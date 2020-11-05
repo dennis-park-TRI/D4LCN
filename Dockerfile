@@ -155,5 +155,5 @@ RUN pip install -U numba
 
 WORKDIR ${WORKSPACE}
 
-# For eGPU on Lenovo P52
-ENV CUDA_VISIBLE_DEVICES=0
+# # For eGPU on Lenovo P52
+# ENV CUDA_VISIBLE_DEVICES=0
