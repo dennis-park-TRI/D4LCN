@@ -16,6 +16,8 @@ import re
 from PIL import Image
 from copy import deepcopy
 
+from tqdm import tqdm
+
 sys.dont_write_bytecode = True
 
 # -----------------------------------------
@@ -60,6 +62,12 @@ class Dataset(torch.utils.data.Dataset):
             # cycle through each dataset
             for dbind, db in enumerate(conf.datasets_train):
 
+                # (dennis.park) only support 'split1' for now.
+                assert len(conf.datasets_train) == 1
+                assert conf.datasets_train[0]['name'] == "kitti_split1"
+                with open(os.path.join(conf.KITTI3D_ROOT, 'mv3d_kitti_split', 'train.txt'), 'r') as f:
+                    image_ids = f.read().splitlines()
+
                 logging.info('Loading imdb {}'.format(db['name']))
 
                 # single imdb
@@ -68,12 +76,13 @@ class Dataset(torch.utils.data.Dataset):
                 # kitti formatting
                 if db['anno_fmt'].lower() == 'kitti_det':
 
-                    train_folder = os.path.join(root, db['name'], 'training')
+                    # train_folder = os.path.join(root, db['name'], 'training')
+                    train_folder = os.path.join(conf.KITTI3D_ROOT, 'training')
 
                     ann_folder = os.path.join(train_folder, 'label_2', '')
                     cal_folder = os.path.join(train_folder, 'calib', '')
                     im_folder = os.path.join(train_folder, 'image_2', '')
-                    depth_folder = os.path.join(train_folder, 'depth_2', '')
+                    # depth_folder = os.path.join(train_folder, 'depth_2', '')
 
                     # get sorted filepaths
                     annlist = sorted(glob(ann_folder + '*.txt'))
@@ -82,19 +91,24 @@ class Dataset(torch.utils.data.Dataset):
 
                     self.affine_size = None if not ('affine_size' in conf) else conf.affine_size
 
-                    for annind, annpath in enumerate(annlist):
+                    # for annind, annpath in enumerate(annlist):
+                    for idx, image_id in tqdm(enumerate(image_ids), total=len(image_ids)):
 
-                        # get file parts
-                        base = os.path.basename(annpath)
-                        id, ext = os.path.splitext(base)
+                        annpath = os.path.join(ann_folder, image_id + '.txt')
+
+                        # # get file parts
+                        # base = os.path.basename(annpath)
+                        # id, ext = os.path.splitext(base)
+                        id = image_id
 
                         calpath = os.path.join(cal_folder, id + '.txt')
                         impath = os.path.join(im_folder, id + db['im_ext'])
-                        impath_pre = os.path.join(train_folder, 'prev_2', id + '_01' + db['im_ext'])
-                        impath_pre2 = os.path.join(train_folder, 'prev_2', id + '_02' + db['im_ext'])
-                        impath_pre3 = os.path.join(train_folder, 'prev_2', id + '_03' + db['im_ext'])
-                        depthpath = os.path.join(train_folder, 'depth_2', id + '.png')
-                        segpath = os.path.join(train_folder, 'seg', id + '.png')
+                        # impath_pre = os.path.join(train_folder, 'prev_2', id + '_01' + db['im_ext'])
+                        # impath_pre2 = os.path.join(train_folder, 'prev_2', id + '_02' + db['im_ext'])
+                        # impath_pre3 = os.path.join(train_folder, 'prev_2', id + '_03' + db['im_ext'])
+                        # depthpath = os.path.join(train_folder, 'depth_2', id + '.png')
+                        depthpath = os.path.join(conf.DORN_KITTI_DEPTH_DIR, image_id + '.png')
+                        # segpath = os.path.join(train_folder, 'seg', id + '.png')
 
                         # read gts
                         p2 = read_kitti_cal(calpath)
@@ -156,10 +170,10 @@ class Dataset(torch.utils.data.Dataset):
                         im = Image.open(impath)
                         obj.path = impath
                         obj.path_depth = depthpath
-                        obj.path_seg = segpath
-                        obj.path_pre = impath_pre
-                        obj.path_pre2 = impath_pre2
-                        obj.path_pre3 = impath_pre3
+                        # obj.path_seg = segpath
+                        # obj.path_pre = impath_pre
+                        # obj.path_pre2 = impath_pre2
+                        # obj.path_pre3 = impath_pre3
                         obj.imW, obj.imH = im.size
 
                         # database properties
@@ -170,9 +184,9 @@ class Dataset(torch.utils.data.Dataset):
                         # store
                         imdb_single_db.append(obj)
 
-                        if (annind % 1000) == 0 and annind > 0:
-                            time_str, dt = compute_eta(imdb_start, annind, len(annlist))
-                            logging.info('{}/{}, dt: {:0.4f}, eta: {}'.format(annind, len(annlist), dt, time_str))
+                        # if (annind % 1000) == 0 and annind > 0:
+                        #     time_str, dt = compute_eta(imdb_start, annind, len(annlist))
+                        #     logging.info('{}/{}, dt: {:0.4f}, eta: {}'.format(annind, len(annlist), dt, time_str))
 
 
                 # concatenate single imdb into full imdb
@@ -199,7 +213,7 @@ class Dataset(torch.utils.data.Dataset):
 
         # check classes
         cls_not_used = []
-        for imobj in imdb:
+        for imobj in tqdm(imdb, total=len(imdb)):
 
             for gt in imobj.gts:
                 cls = gt.cls
@@ -303,7 +317,7 @@ class Dataset(torch.utils.data.Dataset):
 
         # go through each batch
         for sample in batch:
-            
+
             # append images and object dictionaries
             imgs.append(sample[0])
             imobjs.append(sample[2])
@@ -642,4 +656,4 @@ def balance_samples(conf, imdb):
     sample_weights /= np.sum(sample_weights)
 
     return sample_weights
-    
+

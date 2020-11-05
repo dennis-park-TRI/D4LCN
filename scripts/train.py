@@ -48,17 +48,19 @@ def main(argv):
 
     conf = init_config(conf_name)
     paths = init_training_paths(conf_name, conf.result_dir)
+    compile_kitti_evaluator(conf)
 
     init_torch(conf.rng_seed, conf.cuda_seed)
     init_log_file(paths.logs)
 
-    vis = init_visdom(conf.result_dir, conf.visdom_port)
+    # vis = init_visdom(conf.result_dir, conf.visdom_port)
 
     # defaults
     start_iter = 0
     tracker = edict()
     iterator = None
-    has_visdom = vis is not None
+    # has_visdom = vis is not None
+    has_visdom = False
 
     dataset = Dataset(conf, paths.data, paths.output)
 
@@ -207,6 +209,13 @@ def main(argv):
 
     print(conf.result_dir)
 
+def compile_kitti_evaluator(conf):
+    cwd = os.getcwd()
+    # os.chdir(os.path.join(conf.KITTI3D_ROOT, 'devkit_object', 'cpp'))
+    # subprocess.Popen('cmake ./ && make', shell=True)
+    os.chdir(os.path.join(conf.KITTI3D_ROOT, 'kitti_native_evaluation'))
+    subprocess.Popen('cmake ./ && make', shell=True)
+    os.chdir(cwd)
 
 # run from command line
 if __name__ == "__main__":

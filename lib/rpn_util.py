@@ -10,13 +10,18 @@ import math
 import re
 import gc
 
+from tqdm import tqdm
+
 from lib.util import *
 from lib.core import *
 from lib.augmentations import *
-from lib.nms.gpu_nms import gpu_nms
+# from lib.nms.gpu_nms import gpu_nms
+from d4lcn_lib.nms.gpu_nms import gpu_nms
 import torch.nn.functional as F
 
 from copy import deepcopy
+
+import hashlib
 
 
 def generate_anchors(conf, imdb, cache_folder):
@@ -47,7 +52,6 @@ def generate_anchors(conf, imdb, cache_folder):
 
                 anchors[aind, 0:4] = anchor_center(w, h, conf.feat_stride)
                 aind += 1
-
 
         # optionally cluster anchors
         if conf.cluster_anchors:
@@ -966,7 +970,7 @@ def project_3d_corners(p2, x3d, y3d, z3d, w3d, h3d, l3d, ry3d):
     5  upper back left
     6  bottom back left
     7  bottom back right
-    
+
     bot_inds = np.array([2,3,6,7])
     top_inds = np.array([0,1,4,5])
     '''
@@ -1443,12 +1447,18 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
     """
     Test the KITTI framework for object detection in 3D
     """
+    # (dennis.park) for now only supports 'split1/val'
+    assert dataset_test == "kitti_split1"
+    assert test_split == 'validation'
+    with open(os.path.join(rpn_conf.KITTI3D_ROOT, 'mv3d_kitti_split', 'val.txt'), 'r') as f:
+        image_ids = f.read().splitlines()
+    # train_folder = '/mnt/fsx/datasets/KITTI3D/training'
+    train_folder = os.path.join(rpn_conf.KITTI3D_ROOT, 'training')
 
     # import read_kitti_cal
     from lib.imdb_util import read_kitti_cal
 
-    # test_split = 'validation'
-    imlist = list_files(os.path.join(test_path, dataset_test, test_split, 'image_2', ''), '*.png')
+    # imlist = list_files(os.path.join(test_path, dataset_test, test_split, 'image_2', ''), '*.png')
 
     preprocess = Preprocess([rpn_conf.test_scale], rpn_conf.image_means, rpn_conf.image_stds, rpn_conf.depth_mean,
                             rpn_conf.depth_std, rpn_conf.use_rcnn_pretrain)
@@ -1460,13 +1470,20 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
     # init
     test_start = time()
 
-    for imind, impath in enumerate(imlist):
+    # for imind, impath in enumerate(imlist):
+    for imind, image_id in tqdm(enumerate(image_ids), total=len(image_ids)):
+
+        impath = os.path.join(train_folder, 'image_2', image_id + '.png')
+
 
         im = cv2.imread(impath)
         if rpn_conf.depth_channel == 3:
-            depth = cv2.imread(impath.replace('image_2', 'depth_2'))
+            # (dennis.park) Not supported.
+            raise NotImplementedError()
+            # depth = cv2.imread(impath.replace('image_2', 'depth_2'))
         else:
-            depth = cv2.imread(impath.replace('image_2', 'depth_2'), cv2.IMREAD_UNCHANGED)
+            depth = cv2.imread(os.path.join(rpn_conf.DORN_KITTI_DEPTH_DIR, image_id + '.png'), cv2.IMREAD_UNCHANGED)
+            # depth = cv2.imread(impath.replace('image_2', 'depth_2'), cv2.IMREAD_UNCHANGED)
             depth = depth[:, :, np.newaxis]
             if rpn_conf.use_seg:
                 seg = cv2.imread(impath.replace('image_2', 'seg'), cv2.IMREAD_UNCHANGED)
@@ -1476,18 +1493,20 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
             else:
                 depth = np.tile(depth, (1, 1, 3))
 
-        base_path, name, ext = file_parts(impath)
+        # base_path, name, ext = file_parts(impath)
 
         # read in calib
-        p2 = read_kitti_cal(os.path.join(test_path, dataset_test, test_split, 'calib', name + '.txt'))  # 3d to 2d
+        # p2 = read_kitti_cal(os.path.join(test_path, dataset_test, test_split, 'calib', name + '.txt'))  # 3d to 2d
+        p2 = read_kitti_cal(os.path.join(train_folder, 'calib', image_id + '.txt'))
         p2_inv = np.linalg.inv(p2)
 
         # forward test batch
         aboxes = im_detect_3d(im, depth, net, rpn_conf, preprocess, p2)
 
-        base_path, name, ext = file_parts(impath)
+        # base_path, name, ext = file_parts(impath)
 
-        file = open(os.path.join(results_path, name + '.txt'), 'w')
+        # file = open(os.path.join(results_path, name + '.txt'), 'w')
+        file = open(os.path.join(results_path, image_id + '.txt'), 'w')
         text_to_write = ''
 
         for boxind in range(0, min(rpn_conf.nms_topN_post, aboxes.shape[0])):
@@ -1542,20 +1561,31 @@ def test_kitti_3d(dataset_test, test_split, net, rpn_conf, results_path, test_pa
         file.write(text_to_write)
         file.close()
 
-        # display stats
-        if (imind + 1) % 100 == 0:
-            time_str, dt = compute_eta(test_start, imind + 1, len(imlist))
+        # # display stats
+        # if (imind + 1) % 100 == 0:
+        #     # time_str, dt = compute_eta(test_start, imind + 1, len(imlist))
+        #     time_str, dt = compute_eta(test_start, imind + 1, len(image_ids))
 
-            print_str = 'testing {}/{}, dt: {:0.3f}, eta: {}'.format(imind + 1, len(imlist), dt, time_str)
+        #     # print_str = 'testing {}/{}, dt: {:0.3f}, eta: {}'.format(imind + 1, len(imlist), dt, time_str)
+        #     print_str = 'testing {}/{}, dt: {:0.3f}, eta: {}'.format(imind + 1, len(image_ids), dt, time_str)
 
-            if use_log: logging.info(print_str)
-            else: print(print_str, flush=True)
-
+        #     if use_log: logging.info(print_str)
+        #     else: print(print_str, flush=True)
 
     # evaluate
-    script = os.path.join(test_path, dataset_test, 'devkit', 'cpp', 'evaluate_object')
+    # script = os.path.join(rpn_conf.KITTI3D_ROOT, 'devkit_object', 'cpp', 'evaluate_object')
+    # (dennis.park) https://github.com/asharakeh/kitti_native_evaluation
+    script = os.path.join(rpn_conf.KITTI3D_ROOT, 'kitti_native_evaluation', 'evaluate_object_3d_offline')
     with open(os.devnull, 'w') as devnull:
-        out = subprocess.check_output([script, results_path.replace('/data', '')], stderr=devnull)
+        # out = subprocess.check_output([script, results_path.replace('/data', '')], stderr=devnull)
+        ground_truth_dir = os.path.join(rpn_conf.KITTI3D_ROOT, 'training', 'label_2')
+        prediction_dir = os.path.dirname(results_path)
+        prediction_dir = results_path
+        output = subprocess.check_output(
+            f"{script} {ground_truth_dir} {prediction_dir} ",
+            shell=True,
+            universal_newlines=True
+        ).strip()
 
     for lbl in rpn_conf.lbls:
 
@@ -1705,5 +1735,3 @@ def test_projection(p2, p2_inv, box_2d, cx, cy, z, w3d, h3d, l3d, rotY):
     ol = -(np.abs(x - x_new) + np.abs(y - y_new) + np.abs(x2 - x2_new) + np.abs(y2 - y2_new))  # L1 norm
 
     return ol, verts3d, b2, invalid
-
-
